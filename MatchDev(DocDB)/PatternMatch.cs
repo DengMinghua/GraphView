@@ -26,10 +26,9 @@ namespace GroupQuery
         static void Main(string[] args)
         {
             ins.init();
-            //ins.showAll();
+            ins.showAll();
             ins.QueryTrianglePattern();
-            //Console.ReadKey();
-            //ins.QueryComplexPattern();
+            ins.QueryComplexPattern();
             Console.WriteLine("Ok!");
             Console.ReadKey();
 
