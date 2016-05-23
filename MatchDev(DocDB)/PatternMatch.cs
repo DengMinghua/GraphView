@@ -159,7 +159,7 @@ namespace GroupQuery
             var res = ins.ExcuteQuery("GraphMatch", "GraphTwo", script);
             foreach (var x in res)
             {
-                JToken NodeInfo = JObject.Parse(JsonConvert.SerializeObject(x))["NodeInfo"];
+                JToken NodeInfo = ((JObject)x)["NodeInfo"];
                 var edge = NodeInfo["edge"];
                 var id = NodeInfo["id"];
                 bool avaliableFlag = false;
