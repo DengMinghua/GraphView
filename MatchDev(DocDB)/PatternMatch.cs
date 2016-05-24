@@ -18,9 +18,9 @@ using System.Runtime.Serialization.Formatters.Binary;
 namespace GroupQuery
 {
     using BindingStatue = Dictionary<string, int>;
-    using LinkStatue = Dictionary<string, List<string>>;
-    using PathStatue = Tuple<Dictionary<string, int>, Dictionary<string, List<string>>>;
-    using StageStatue = List<Tuple<Dictionary<string, int>, Dictionary<string, List<string>>>>;
+    using LinkStatue = Dictionary<string, HashSet<string>>;
+    using PathStatue = Tuple<Dictionary<string, int>, Dictionary<string, HashSet<string>>>;
+    using StageStatue = List<Tuple<Dictionary<string, int>, Dictionary<string, HashSet<string>>>>;
 
     class GroupQueryComponent
     {
@@ -36,7 +36,7 @@ namespace GroupQuery
 
         static void Main(string[] args)
         {
-            LinkZero.Add("Bindings", new List<string>());
+            LinkZero.Add("Bindings", new HashSet<string>());
             ins.init();
             ins.QueryTrianglePattern();
             Console.WriteLine("Ok!");
@@ -114,7 +114,7 @@ namespace GroupQuery
                     foreach (var y in edge)
                     {
                         if (!QueryResult.ContainsKey(id.ToString()))
-                            QueryResult.Add(id.ToString(), new List<string>());
+                            QueryResult.Add(id.ToString(), new HashSet<string>());
                         QueryResult[id.ToString()].Add(y["_sink"].ToString());
 
                     }
@@ -128,10 +128,10 @@ namespace GroupQuery
                                 newBinding.Copy();
                                 newBinding.Add(id.ToString(), from);
                                 LinkStatue newLink = new LinkStatue();
-                                List<string> newList;
+                                HashSet<string> newList;
                                 foreach (var x in path.Item2)
                                 {
-                                    newList = new List<string>(x.Value);
+                                    newList = new HashSet<string>(x.Value);
                                     newLink.Add(x.Key, newList);
                                 }
                                 newLink["Bindings"].Add(from.ToString());
@@ -148,7 +148,7 @@ namespace GroupQuery
                     foreach (var BindingPair in path.Item1)
                         if (BindingPair.Value == from)
                         {
-                            List<string> LinkOfStartNode = new List<string>();
+                            HashSet<string> LinkOfStartNode = new HashSet<string>();
                             if (QueryResult.TryGetValue(BindingPair.Key, out LinkOfStartNode))
                             {
                                 // For each node link to start nodes
@@ -157,10 +157,10 @@ namespace GroupQuery
                                     int group = 0;
 
                                     LinkStatue newLink = new LinkStatue();
-                                    List<string> newList;
+                                    HashSet<string> newList;
                                     foreach (var x in path.Item2)
                                     {
-                                        newList = new List<string>(x.Value);
+                                        newList = new HashSet<string>(x.Value);
                                         newLink.Add(x.Key, newList);
                                     }
                                     // If end group has been binded to some nodes
@@ -171,7 +171,7 @@ namespace GroupQuery
                                         {
                                             // Construct new Link
                                             if (!path.Item2.ContainsKey(BindingPair.Key))
-                                                newLink.Add(BindingPair.Key, new List<string>());
+                                                newLink.Add(BindingPair.Key, new HashSet<string>());
                                             newLink[BindingPair.Key].Add(end);
                                             CurrentStage.Add(new PathStatue(path.Item1, newLink));
                                         }
@@ -182,7 +182,7 @@ namespace GroupQuery
                                         newLink["Bindings"].Add(to.ToString());
                                         // Construct new Link
                                         if (!path.Item2.ContainsKey(BindingPair.Key))
-                                            newLink.Add(BindingPair.Key, new List<string>());
+                                            newLink.Add(BindingPair.Key, new HashSet<string>());
                                         newLink[BindingPair.Key].Add(end);
                                         // Bind the selected node to end group
                                         BindingStatue newBinding = new BindingStatue(path.Item1);
