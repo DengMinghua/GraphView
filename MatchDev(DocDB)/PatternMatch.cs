@@ -20,11 +20,10 @@ namespace GroupQuery
     using BindingStatue = Dictionary<string, int>;
     using LinkStatue = Dictionary<string, HashSet<string>>;
     using PathStatue = Tuple<Dictionary<string, int>, Dictionary<string, HashSet<string>>>;
-    using StageStatue = List<Tuple<Dictionary<string, int>, Dictionary<string, HashSet<string>>>>;
 
     class GroupQueryComponent
     {
-        private DocumentClient client;
+        static private DocumentClient client;
         private const string EndpointUrl = "https://graphview.documents.azure.com:443/";
         private const string PrimaryKey = "MqQnw4xFu7zEiPSD+4lLKRBQEaQHZcKsjlHxXn2b96pE/XlJ8oePGhjnOofj1eLpUdsfYgEhzhejk2rjH/+EKA==";
         static GroupQueryComponent ins = new GroupQueryComponent();
@@ -32,7 +31,7 @@ namespace GroupQuery
         static LinkStatue LinkZero = new LinkStatue();
         static BindingStatue BindZero = new BindingStatue();
         static PathStatue PathZero = new Tuple<BindingStatue, LinkStatue>(BindZero, LinkZero);
-        static StageStatue StageZero = new StageStatue() { PathZero };
+        static List<PathStatue> StageZero = new List<PathStatue>() { PathZero };
 
         static void Main(string[] args)
         {
@@ -45,12 +44,12 @@ namespace GroupQuery
         }
         public void init()
         {
-            this.client = new DocumentClient(new Uri(EndpointUrl), PrimaryKey);
+            client = new DocumentClient(new Uri(EndpointUrl), PrimaryKey);
         }
         public IQueryable<dynamic> ExcuteQuery(string database, string collection, string script)
         {
             FeedOptions queryOptions = new FeedOptions { MaxItemCount = -1 };
-            IQueryable<dynamic> Result = this.client.CreateDocumentQuery(
+            IQueryable<dynamic> Result = client.CreateDocumentQuery(
                     UriFactory.CreateDocumentCollectionUri(database, collection),
                     script,
                     queryOptions);
@@ -61,16 +60,15 @@ namespace GroupQuery
             var all = ExcuteQuery("GraphMatch", "GraphTwo", "SELECT * FROM ALL");
             foreach (var x in all) Console.Write(x);
         }
-        public StageStatue FindLink(StageStatue LastStage, int from, int to, HashSet<int> ReverseCheckSet = null)
+        public IEnumerable<PathStatue> FindLink(IEnumerable<PathStatue> LastStage, int from, int to, HashSet<int> ReverseCheckSet = null)//,string From, string where)
         {
-            StageStatue MiddleStage = new StageStatue(LastStage);
-            StageStatue CurrentStage = new StageStatue();
             LinkStatue QueryResult = new LinkStatue();
-
+            List<PathStatue> MiddleStage = new List<PathStatue>();
             // For start nodes which has been binded
             string InRangeScript = "";
             foreach (var path in LastStage)
             {
+                MiddleStage.Add(path);
                 foreach (var BindingPair in path.Item1)
                     if (BindingPair.Value == from)
                     {
@@ -173,7 +171,7 @@ namespace GroupQuery
                                             if (!path.Item2.ContainsKey(BindingPair.Key))
                                                 newLink.Add(BindingPair.Key, new HashSet<string>());
                                             newLink[BindingPair.Key].Add(end);
-                                            CurrentStage.Add(new PathStatue(path.Item1, newLink));
+                                            yield return new PathStatue(path.Item1, newLink);
                                         }
                                     }
                                     else
@@ -187,16 +185,16 @@ namespace GroupQuery
                                         // Bind the selected node to end group
                                         BindingStatue newBinding = new BindingStatue(path.Item1);
                                         newBinding.Add(end, to);
-                                        CurrentStage.Add(new PathStatue(newBinding, newLink));
+                                        yield return new PathStatue(newBinding, newLink);
                                     }
                                 }
                             }
                         }
                 }
             }
-            return CurrentStage;
+            yield break;
         }
-        public HashSet<string> ExtractNodes(StageStatue Stage)
+        public HashSet<string> ExtractNodes(IEnumerable<PathStatue> Stage)
         {
             HashSet<string> res = new HashSet<string>();
             foreach (var path in Stage)
