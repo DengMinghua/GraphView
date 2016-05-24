@@ -11,37 +11,41 @@ using Newtonsoft.Json;
 using GraphView;
 using Newtonsoft.Json.Linq;
 
+using System.IO;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Formatters.Binary;
 
 namespace GroupQuery
 {
-    using linkTuple = Tuple<string, List<string>>;
-    class GroupQueryTest
+    using BindingStatue = Dictionary<string, int>;
+    using LinkStatue = Dictionary<string, List<string>>;
+    using PathStatue = Tuple<Dictionary<string, int>, Dictionary<string, List<string>>>;
+    using StageStatue = List<Tuple<Dictionary<string, int>, Dictionary<string, List<string>>>>;
+
+    class GroupQueryComponent
     {
-        private linkTuple zeroTuple = new linkTuple("ALL", new List<string>());
         private DocumentClient client;
         private const string EndpointUrl = "https://graphview.documents.azure.com:443/";
         private const string PrimaryKey = "MqQnw4xFu7zEiPSD+4lLKRBQEaQHZcKsjlHxXn2b96pE/XlJ8oePGhjnOofj1eLpUdsfYgEhzhejk2rjH/+EKA==";
-        static GroupQueryTest ins = new GroupQueryTest();
+        static GroupQueryComponent ins = new GroupQueryComponent();
+        static List<string> ListZero = new List<string>();
+        static LinkStatue LinkZero = new LinkStatue();
+        static BindingStatue BindZero = new BindingStatue();
+        static PathStatue PathZero = new Tuple<BindingStatue, LinkStatue>(BindZero, LinkZero);
+        static StageStatue StageZero = new StageStatue() { PathZero };
 
         static void Main(string[] args)
         {
+            LinkZero.Add("Bindings", new List<string>());
             ins.init();
-            ins.showAll();
             ins.QueryTrianglePattern();
-            ins.QueryComplexPattern();
             Console.WriteLine("Ok!");
             Console.ReadKey();
 
         }
-        #region basicOperator
         public void init()
         {
             this.client = new DocumentClient(new Uri(EndpointUrl), PrimaryKey);
-        }
-        public void showAll()
-        {
-            var all = ExcuteQuery("GraphMatch", "GraphTwo", "SELECT * FROM ALL");
-            foreach (var x in all) Console.Write(x);
         }
         public IQueryable<dynamic> ExcuteQuery(string database, string collection, string script)
         {
@@ -52,177 +56,165 @@ namespace GroupQuery
                     queryOptions);
             return Result;
         }
-        #endregion
-        #region findLink
-        public string at(string path, int pos)
+        public void ShowAll()
         {
-            return path.Substring(pos * 37 + 1, 36);
+            var all = ExcuteQuery("GraphMatch", "GraphTwo", "SELECT * FROM ALL");
+            foreach (var x in all) Console.Write(x);
         }
-        public linkTuple FindLink(linkTuple lastTuple, int bindto = -1, bool reverse = false)
+        public StageStatue FindLink(StageStatue LastStage, int from, int to, HashSet<int> ReverseCheckSet = null)
         {
-            bool initFlag = false;
-            List<string> myPath = new List<string>();
-            IQueryable<dynamic> res;
-            string range = lastTuple.Item1;
-            List<string> lastPath = lastTuple.Item2;
-            if (lastPath.Count == 0) initFlag = true;
-            string dest = "";
-            string way = "";
-            if (reverse) way = "reverse"; else way = "edge";
-            string script = "SELECT {\"id\":node.id, \"edge\":node._edge, \"reverse\":node._reverse_edge} AS NodeInfo" +
-                " FROM NODE node";
+            StageStatue MiddleStage = new StageStatue(LastStage);
+            StageStatue CurrentStage = new StageStatue();
+            LinkStatue QueryResult = new LinkStatue();
 
-            if (range != "ALL") script += " WHERE node.id IN (" + range + ")";
-            res = ins.ExcuteQuery("GraphMatch", "GraphTwo", script);
+            // For start nodes which has been binded
+            string InRangeScript = "";
+            foreach (var path in LastStage)
+            {
+                foreach (var BindingPair in path.Item1)
+                    if (BindingPair.Value == from)
+                    {
+                        InRangeScript += "\"" + BindingPair.Key + "\"" + ",";
+                    }
+            }
 
-            foreach (var x in res)
-            {
-                JToken NodeInfo = JObject.Parse(JsonConvert.SerializeObject(x))["NodeInfo"];
-                var edge = NodeInfo[way];
-                var id = NodeInfo["id"];
-                if (initFlag) lastPath.Add("/" + id.ToString());
-                var idLength = id.ToString().Length;
-                foreach (var y in edge)
-                {
-                    foreach (var s in lastPath) if (s.Substring(s.Length - idLength, idLength) == id.ToString())
-                        {
-                            if (bindto == -1)
-                            {
-                                if (s.IndexOf(y["_sink"].ToString()) == -1)
-                                {
-                                    dest = dest + ("\"" + y["_sink"]) + "\"" + ", ";
-                                    myPath.Add(s + "/" + y["_sink"].ToString());
-                                }
-                            }
-                            else
-                            {
-                                if (at(s, bindto) == y["_sink"].ToString())
-                                {
-                                    dest = dest + ("\"" + y["_sink"]) + "\"" + ", ";
-                                    myPath.Add(s + "/" + y["_sink"].ToString());
-                                }
-                            }
-                        }
-                }
-            }
-            if (dest.Length != 0) return new Tuple<string, List<string>>(dest.Substring(0, dest.Length - 2), myPath);
-            else return new Tuple<string, List<string>>(dest, myPath);
-        }
-        public linkTuple FindPrev(linkTuple link, int bindto = -1)
-        {
-            return FindLink(link, bindto, true);
-        }
-        public linkTuple FindPrevPath(linkTuple begin, int cnt)
-        {
-            linkTuple tempTuple = begin;
-            for (int i = 0; i < cnt; i++)
-            {
-                tempTuple = FindPrev(tempTuple);
-            }
-            return tempTuple;
-        }
-        public linkTuple FindSucc(linkTuple link, int bindto = -1)
-        {
-            return FindLink(link, bindto, false);
-        }
-        public linkTuple FindSuccPath(linkTuple begin, int cnt)
-        {
-            linkTuple tempTuple = begin;
-            for (int i = 0; i < cnt; i++)
-            {
-                tempTuple = FindSucc(tempTuple);
-            }
-            return tempTuple;
-        }
-        public linkTuple FindUnion(linkTuple link, int srcNode, int destNode = -1)
-        {
-            List<string> lastPath = link.Item2;
-            List<string> myPath = new List<string>();
-            List<string> srcSet = new List<string>();
-            List<string> destSet = new List<string>();
-            string src = "";
-            string dest = "";
-            foreach (string path in link.Item2)
-                srcSet.Add(at(path, srcNode));
-            if (destNode != -1)
-                foreach (string path in link.Item2)
-                    destSet.Add(at(path, destNode));
-            foreach (string x in srcSet)
-                src = src + "\"" + x + "\"" + ", ";
-            foreach (string x in destSet)
-                dest = dest + "\"" + x + "\"" + ", ";
-            if (src.Length == 0) return link;
-            src = src.Substring(0, src.Length - 2);
-            string script = "SELECT {\"id\":node.id, \"edge\":node._edge, \"reverse\":node._reverse_edge} AS NodeInfo" +
-                " FROM NODE node" +
-                " WHERE node.id IN (" + src + ")";
+            bool NotYetBind = InRangeScript.Length == 0;
+            // To find not yet binded start nodes and possible end nodes
+            string script =
+                "SELECT {\"id\":node.id, \"edge\":node._edge, \"reverse\":node._reverse_edge} AS NodeInfo" +
+               " FROM NODE node";
+            string WhereScript = NotYetBind ? "" : " WHERE node.id IN (" + InRangeScript.Substring(0, InRangeScript.Length - 1) + ")";
+            script += WhereScript;
             var res = ins.ExcuteQuery("GraphMatch", "GraphTwo", script);
-            foreach (var x in res)
+
+            foreach (var item in res)
             {
-                JToken NodeInfo = ((JObject)x)["NodeInfo"];
+                JToken NodeInfo = ((JObject)item)["NodeInfo"];
                 var edge = NodeInfo["edge"];
                 var id = NodeInfo["id"];
-                bool avaliableFlag = false;
-                if (destNode != -1)
+                var reverse = NodeInfo["reverse"];
+                bool ReverseVailed = true;
+                if (ReverseCheckSet != null)
                 {
-                    foreach (var y1 in edge)
-                        if (dest.IndexOf(y1["_sink"].ToString()) != -1)
+                    foreach (var path in LastStage)
+                    {
+                        foreach (var y in reverse)
                         {
-                            avaliableFlag = true;
-                            foreach (var z in lastPath)
+                            if (path.Item1.ContainsKey(y["_sink"].ToString()))
                             {
-                                if (at(z, z.Length / 37 - 1) == id.ToString())
-                                    myPath.Add(z + "/" + y1["_sink"].ToString());
+                                if (!ReverseCheckSet.Contains(path.Item1[y["_sink"].ToString()]))
+                                    ReverseVailed = false;
+                            }
+                        }
+                    }
+                }
+                if (ReverseVailed)
+                {
+                    // Construct adj list for current statue
+                    foreach (var y in edge)
+                    {
+                        if (!QueryResult.ContainsKey(id.ToString()))
+                            QueryResult.Add(id.ToString(), new List<string>());
+                        QueryResult[id.ToString()].Add(y["_sink"].ToString());
+
+                    }
+                    // If no start nodes has been binded to the giving group, bind each unbinded node to start node
+                    if (NotYetBind)
+                        foreach (var path in LastStage)
+                        {
+                            if (!path.Item1.ContainsKey(id.ToString()))
+                            {
+                                BindingStatue newBinding = new BindingStatue(path.Item1);
+                                newBinding.Copy();
+                                newBinding.Add(id.ToString(), from);
+                                LinkStatue newLink = new LinkStatue();
+                                List<string> newList;
+                                foreach (var x in path.Item2)
+                                {
+                                    newList = new List<string>(x.Value);
+                                    newLink.Add(x.Key, newList);
+                                }
+                                newLink["Bindings"].Add(from.ToString());
+                                PathStatue newPath = new PathStatue(newBinding, newLink);
+                                MiddleStage.Add(newPath);
                             }
                         }
                 }
-                else
+                // For each path in current stage
+                foreach (var path in MiddleStage)
                 {
-                    foreach (var y2 in edge)
-                            foreach (var z in lastPath)
-                                if (at(z, srcNode) == id.ToString() &&
-                                            z.IndexOf(y2["_sink"].ToString()) == -1)
+
+                    // For each binded start node
+                    foreach (var BindingPair in path.Item1)
+                        if (BindingPair.Value == from)
+                        {
+                            List<string> LinkOfStartNode = new List<string>();
+                            if (QueryResult.TryGetValue(BindingPair.Key, out LinkOfStartNode))
+                            {
+                                // For each node link to start nodes
+                                foreach (var end in LinkOfStartNode)
                                 {
-                                    myPath.Add(z + "/" + y2["_sink"].ToString());
-                                    avaliableFlag = true;
+                                    int group = 0;
+
+                                    LinkStatue newLink = new LinkStatue();
+                                    List<string> newList;
+                                    foreach (var x in path.Item2)
+                                    {
+                                        newList = new List<string>(x.Value);
+                                        newLink.Add(x.Key, newList);
+                                    }
+                                    // If end group has been binded to some nodes
+                                    if (path.Item2["Bindings"].Contains(to.ToString()))
+                                    {
+                                        // Determine if the node is in the end group and construct new path
+                                        if (path.Item1.TryGetValue(end, out group) && group == to)
+                                        {
+                                            // Construct new Link
+                                            if (!path.Item2.ContainsKey(BindingPair.Key))
+                                                newLink.Add(BindingPair.Key, new List<string>());
+                                            newLink[BindingPair.Key].Add(end);
+                                            CurrentStage.Add(new PathStatue(path.Item1, newLink));
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // if no node was binded to end group
+                                        newLink["Bindings"].Add(to.ToString());
+                                        // Construct new Link
+                                        if (!path.Item2.ContainsKey(BindingPair.Key))
+                                            newLink.Add(BindingPair.Key, new List<string>());
+                                        newLink[BindingPair.Key].Add(end);
+                                        // Bind the selected node to end group
+                                        BindingStatue newBinding = new BindingStatue(path.Item1);
+                                        newBinding.Add(end, to);
+                                        CurrentStage.Add(new PathStatue(newBinding, newLink));
+                                    }
                                 }
+                            }
+                        }
                 }
-                    if (avaliableFlag == false)
-                        link.Item2.RemoveAll((string str) => { return str.IndexOf(id.ToString()) == -1 ? false : true; });
             }
-            return new linkTuple(link.Item1, myPath);
+            return CurrentStage;
         }
-        public HashSet<string> ExtractNodes(linkTuple link)
+        public HashSet<string> ExtractNodes(StageStatue Stage)
         {
             HashSet<string> res = new HashSet<string>();
-            foreach (var path in link.Item2)
+            foreach (var path in Stage)
             {
-                int cnt = path.Length / 37;
-                for (int i = 0; i < cnt; i++)
-                    res.Add(at(path, i));
+                foreach (var node in path.Item1)
+                {
+                    res.Add(node.Key);
+                }
             }
             return res;
         }
-        #endregion
-        #region patternMatch
+
         public void QueryTrianglePattern()
         {
-            var q = ExtractNodes(FindSucc(FindSucc(FindSucc(zeroTuple)), 0));
+            var q = ExtractNodes(FindLink(FindLink(FindLink(StageZero, 1, 2), 2, 3), 3, 1));
             foreach (var x in q)
                 Console.WriteLine(x);
         }
-        public void QueryCubePattern()
-        {
-            var q = ExtractNodes(FindSucc(FindSuccPath(zeroTuple, 3), 0));
-            foreach (var x in q)
-                Console.WriteLine(x);
-        }
-        public void QueryComplexPattern()
-        {
-            var q = ExtractNodes(FindUnion(FindUnion(FindUnion(FindSucc(FindSucc(zeroTuple)),0,-1),0,-1),1,-1));
-            foreach (var x in q)
-                Console.WriteLine(x);
-        }
-        #endregion
     }
 }
+
