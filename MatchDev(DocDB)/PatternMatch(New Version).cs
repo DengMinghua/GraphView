@@ -11,12 +11,17 @@ using Newtonsoft.Json;
 using GraphView;
 using Newtonsoft.Json.Linq;
 
+using System.IO;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Formatters.Binary;
+
 namespace GroupQuery
 {
     using BindingStatue = Dictionary<string, int>;
     using LinkStatue = Dictionary<string, List<string>>;
     using PathStatue = Tuple<Dictionary<string, int>, Dictionary<string, List<string>>>;
     using StageStatue = List<Tuple<Dictionary<string, int>, Dictionary<string, List<string>>>>;
+
     class GroupQueryComponent
     {
         private DocumentClient client;
@@ -28,6 +33,18 @@ namespace GroupQuery
         static BindingStatue BindZero = new BindingStatue();
         static PathStatue PathZero = new Tuple<BindingStatue,LinkStatue>(BindZero,LinkZero);
         static StageStatue StageZero = new StageStatue() { PathZero };
+        public static T Clone<T>(T RealObject)
+
+        {
+            using (Stream objectStream = new MemoryStream())
+            {
+                IFormatter formatter = new BinaryFormatter();
+                formatter.Serialize(objectStream, RealObject);
+                objectStream.Seek(0, SeekOrigin.Begin);
+                return (T)formatter.Deserialize(objectStream);
+            }
+        }
+
         static void Main(string[] args)
         {
             LinkZero.Add("Bindings", new List<string>());
@@ -57,10 +74,11 @@ namespace GroupQuery
         }
         public StageStatue FindLink(StageStatue LastStage, int from, int to)
         {
-            StageStatue MiddleStage = new StageStatue();
+            StageStatue MiddleStage = new StageStatue(LastStage);
             StageStatue CurrentStage = new StageStatue();
             LinkStatue QueryResult = new LinkStatue();
-
+            
+            // For start nodes which has been binded
             string InRangeScript = "";
             foreach (var path in LastStage)
             {
@@ -70,8 +88,9 @@ namespace GroupQuery
                         InRangeScript += "\"" + BindingPair.Key + "\"" + ",";
                     }
             }
-            bool NotYetBind = InRangeScript.Length == 0;
 
+            bool NotYetBind = InRangeScript.Length == 0;
+            // To find not yet binded start nodes and possible end nodes
             string script =
                 "SELECT {\"id\":node.id, \"edge\":node._edge, \"reverse\":node._reverse_edge} AS NodeInfo" +
                " FROM NODE node";
@@ -84,6 +103,7 @@ namespace GroupQuery
                 JToken NodeInfo = ((JObject)item)["NodeInfo"];
                 var edge = NodeInfo["edge"];
                 var id = NodeInfo["id"];
+                // Construct adj list for current statue
                 foreach (var y in edge)
                 {
                     if (!QueryResult.ContainsKey(id.ToString()))
@@ -91,48 +111,63 @@ namespace GroupQuery
                     QueryResult[id.ToString()].Add(y["_sink"].ToString()); 
 
                 }
+                // If no start nodes has been binded to the giving group, bind each unbinded node to start node
                 if (NotYetBind) 
                     foreach(var path in LastStage)
                     {
                         if (!path.Item1.ContainsKey(id.ToString()))
                         {
-                            BindingStatue newBinding = new BindingStatue(path.Item1);
-                            LinkStatue newLink = new LinkStatue(path.Item2);
-                            newLink["Bindings"].Add(from.ToString());
+                            BindingStatue newBinding = Clone(path.Item1);
+                            newBinding.Copy();
                             newBinding.Add(id.ToString(), from);
-                            MiddleStage.Add(new PathStatue(newBinding, newLink));
+                            LinkStatue newLink = Clone(path.Item2);
+                            newLink["Bindings"].Add(from.ToString());
+                            PathStatue newPath = new PathStatue(newBinding, newLink);
+                            MiddleStage.Add(newPath);
                         }
                     }
             }
-
-            if (!NotYetBind)
-                MiddleStage = LastStage;
-
+            // For each path in current stage
             foreach (var path in MiddleStage)
             {
+                
+                // For each binded start node
                 foreach (var BindingPair in path.Item1)
                     if (BindingPair.Value == from)
                     {
                         List<string> LinkOfStartNode = new List<string>();
                         if (QueryResult.TryGetValue(BindingPair.Key, out LinkOfStartNode))
                         {
+                            // For each node link to start nodes
                             foreach (var end in LinkOfStartNode)
                             {
                                 int group = 0;
 
-                                LinkStatue newLink = new LinkStatue(path.Item2);
-                                if (!path.Item2.ContainsKey(BindingPair.Key))
-                                    newLink.Add(BindingPair.Key, new List<string>());
-                                newLink[BindingPair.Key].Add(end);
+                                LinkStatue newLink = Clone(path.Item2);
+
+                                // If end group has been binded to some nodes
                                 if (path.Item2["Bindings"].Contains(to.ToString()))
                                 {
+                                    // Determine if the node is in the end group and construct new path
                                     if (path.Item1.TryGetValue(end, out group) && group == to)
+                                    {
+                                        // Construct new Link
+                                        if (!path.Item2.ContainsKey(BindingPair.Key))
+                                            newLink.Add(BindingPair.Key, new List<string>());
+                                        newLink[BindingPair.Key].Add(end);
                                         CurrentStage.Add(new PathStatue(path.Item1, newLink));
+                                    }
                                 }
                                 else
                                 {
+                                    // if no node was binded to end group
                                     newLink["Bindings"].Add(to.ToString());
-                                    BindingStatue newBinding = new BindingStatue(path.Item1);
+                                    // Construct new Link
+                                    if (!path.Item2.ContainsKey(BindingPair.Key))
+                                        newLink.Add(BindingPair.Key, new List<string>());
+                                    newLink[BindingPair.Key].Add(end);
+                                    // Bind the selected node to end group
+                                    BindingStatue newBinding = Clone(path.Item1);
                                     newBinding.Add(end, to);
                                     CurrentStage.Add(new PathStatue(newBinding, newLink));
                                 }
